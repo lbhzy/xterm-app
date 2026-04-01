@@ -93,7 +93,7 @@ function App() {
   const [hexDataMap, setHexDataMap] = useState<Map<number, string>>(new Map());
   const [waveDataMap, setWaveDataMap] = useState<Map<number, string>>(new Map());
   const [hexEnabled, setHexEnabled] = useState(false);
-  const [waveEnabled, setWaveEnabled] = useState(true);
+  const [waveEnabled, setWaveEnabled] = useState(false);
   const hexEnabledRef = useRef(hexEnabled);
   hexEnabledRef.current = hexEnabled;
   const waveEnabledRef = useRef(waveEnabled);
