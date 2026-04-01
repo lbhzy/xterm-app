@@ -25,6 +25,10 @@ pub fn run() {
             fonts::system_list_fonts,
         ])
         .setup(|app| {
+            tauri::async_runtime::spawn(async {
+                fonts::warmup_system_fonts_cache().await;
+            });
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

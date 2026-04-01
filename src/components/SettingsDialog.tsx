@@ -28,10 +28,8 @@ interface SettingsDialogProps {
   onCancel: () => void;
 }
 
-interface SystemFontGroups {
+interface SystemFonts {
   all: string[];
-  monospace: string[];
-  chinese: string[];
 }
 
 function normalizeFontName(fontName: string): string {
@@ -62,33 +60,27 @@ export function SettingsDialog({
   onCancel,
 }: SettingsDialogProps) {
   const [settings, setSettings] = useState<TerminalSettings>(initial);
-  const [monoFonts, setMonoFonts] = useState<string[]>([]);
-  const [chineseFonts, setChineseFonts] = useState<string[]>([]);
+  const [allFonts, setAllFonts] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) {
       setSettings(initial);
-      invoke<SystemFontGroups>("system_list_fonts")
+      invoke<SystemFonts>("system_list_fonts")
         .then((fonts) => {
-          const normalizedMono = Array.from(
-            new Set(fonts.monospace.map((font) => normalizeFontName(font)).filter(Boolean))
-          ).sort((a, b) => a.localeCompare(b));
-
-          const normalizedChinese = Array.from(
-            new Set(fonts.chinese.map((font) => normalizeFontName(font)).filter(Boolean))
+          const normalizedFonts = Array.from(
+            new Set(fonts.all.map((font) => normalizeFontName(font)).filter(Boolean))
           ).sort((a, b) => a.localeCompare(b));
 
           const currentPrimary = normalizeFontName(initial.fontFamily || "");
-          const currentChinese = normalizeFontName(initial.fontFamilySecondary || "");
+          const currentFallback = normalizeFontName(initial.fontFamilySecondary || "");
 
-          setMonoFonts(withCurrent(normalizedMono, currentPrimary));
-          setChineseFonts(withCurrent(normalizedChinese, currentChinese));
+          setAllFonts(withCurrent(withCurrent(normalizedFonts, currentPrimary), currentFallback));
         })
         .catch(() => {
           const currentPrimary = normalizeFontName(initial.fontFamily || "");
-          const currentChinese = normalizeFontName(initial.fontFamilySecondary || "");
-          setMonoFonts(currentPrimary ? [currentPrimary] : []);
-          setChineseFonts(currentChinese ? [currentChinese] : []);
+          const currentFallback = normalizeFontName(initial.fontFamilySecondary || "");
+          const fallbackList = currentPrimary ? [currentPrimary] : [];
+          setAllFonts(withCurrent(fallbackList, currentFallback));
         });
     }
   }, [open, initial]);
@@ -174,17 +166,17 @@ export function SettingsDialog({
           {/* Font */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label className="text-sm font-medium">Monospace Font</Label>
+              <Label className="text-sm font-medium">Font Family</Label>
               <Select
                 value={normalizeFontName(settings.fontFamily)}
                 onChange={(e) => update({ fontFamily: normalizeFontName(e.target.value) })}
               >
-                {monoFonts.length === 0 && (
+                {allFonts.length === 0 && (
                   <option value={normalizeFontName(settings.fontFamily)}>
-                    {normalizeFontName(settings.fontFamily) || "No monospace fonts found"}
+                    {normalizeFontName(settings.fontFamily) || "No fonts found"}
                   </option>
                 )}
-                {monoFonts.map((font) => (
+                {allFonts.map((font) => (
                   <option key={font} value={font}>
                     {font}
                   </option>
@@ -192,7 +184,7 @@ export function SettingsDialog({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label className="text-sm font-medium">Chinese Font</Label>
+              <Label className="text-sm font-medium">Fallback Font</Label>
               <Select
                 value={normalizeFontName(settings.fontFamilySecondary || "")}
                 onChange={(e) =>
@@ -200,7 +192,7 @@ export function SettingsDialog({
                 }
               >
                 <option value="">None</option>
-                {chineseFonts.map((font) => (
+                {allFonts.map((font) => (
                   <option key={font} value={font}>
                     {font}
                   </option>
