@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 
 import { cn } from "@/lib/utils";
-import { type TerminalSettings, getTheme } from "@/lib/terminal-settings";
+import { type TerminalSettings, getTheme, getResolvedFontFamily } from "@/lib/terminal-settings";
 import type { Trigger } from "@/lib/triggers";
 
 export type ConnectionType = "pty" | "ssh" | "serial";
@@ -84,7 +84,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       cursorBlink: settings.cursorBlink,
       cursorStyle: settings.cursorStyle,
       fontSize: settings.fontSize,
-      fontFamily: settings.fontFamily,
+      fontFamily: getResolvedFontFamily(settings),
       theme: getTheme(settings),
     });
 
@@ -225,7 +225,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const xterm = xtermRef.current;
     if (!xterm) return;
     xterm.options.fontSize = settings.fontSize;
-    xterm.options.fontFamily = settings.fontFamily;
+    xterm.options.fontFamily = getResolvedFontFamily(settings);
     xterm.options.cursorBlink = settings.cursorBlink;
     xterm.options.cursorStyle = settings.cursorStyle;
     xterm.options.theme = getTheme(settings);

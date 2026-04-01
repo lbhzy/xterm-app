@@ -1,4 +1,5 @@
 mod config;
+mod fonts;
 mod pty;
 mod serial;
 mod session;
@@ -21,6 +22,7 @@ pub fn run() {
             config::config_read,
             config::config_write,
             config::config_open_folder,
+            fonts::system_list_fonts,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

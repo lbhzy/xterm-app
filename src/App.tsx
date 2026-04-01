@@ -114,7 +114,8 @@ function App() {
   // Terminal settings
   const [terminalSettings, setTerminalSettings] = useState<TerminalSettings>({
     fontSize: 14,
-    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+    fontFamily: "Cascadia Mono",
+    fontFamilySecondary: "",
     cursorBlink: true,
     cursorStyle: "block",
     themeName: "Dark (Default)",
@@ -145,9 +146,11 @@ function App() {
   // Save layout on change
   const layoutRef = useRef({ showSidebar, showBottomPanel, sidebarWidth, bottomPanelHeight });
   layoutRef.current = { showSidebar, showBottomPanel, sidebarWidth, bottomPanelHeight };
-  const saveLayoutTimer = useRef<ReturnType<typeof setTimeout>>();
+  const saveLayoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveLayout = useCallback(() => {
-    clearTimeout(saveLayoutTimer.current);
+    if (saveLayoutTimer.current !== null) {
+      clearTimeout(saveLayoutTimer.current);
+    }
     saveLayoutTimer.current = setTimeout(() => {
       invoke("config_write", { key: "layout", value: layoutRef.current });
     }, 300);

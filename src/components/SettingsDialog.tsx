@@ -28,58 +28,19 @@ interface SettingsDialogProps {
   onCancel: () => void;
 }
 
-const ALL_MONO_FONTS = [
-  "Menlo",
-  "Monaco",
-  "Courier New",
-  "Fira Code",
-  "JetBrains Mono",
-  "Source Code Pro",
-  "Cascadia Code",
-  "Cascadia Mono",
-  "IBM Plex Mono",
-  "SF Mono",
-  "Consolas",
-  "Inconsolata",
-  "Hack",
-  "Ubuntu Mono",
-  "Roboto Mono",
-  "Anonymous Pro",
-  "DejaVu Sans Mono",
-  "Droid Sans Mono",
-  "Liberation Mono",
-  "Noto Sans Mono",
-];
-
-function detectAvailableFonts(candidates: string[]): string[] {
-  const testStr = "mmmmmmmmmmlli1|W@#";
-  const size = "72px";
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return candidates;
-
-  // Measure with two different fallback baselines
-  ctx.font = `${size} monospace`;
-  const monoWidth = ctx.measureText(testStr).width;
-  ctx.font = `${size} sans-serif`;
-  const sansWidth = ctx.measureText(testStr).width;
-  ctx.font = `${size} serif`;
-  const serifWidth = ctx.measureText(testStr).width;
-
-  return candidates.filter((font) => {
-    // Test against all three baselines — if width differs from ANY, font exists
-    ctx.font = `${size} "${font}", monospace`;
-    const w1 = ctx.measureText(testStr).width;
-    ctx.font = `${size} "${font}", sans-serif`;
-    const w2 = ctx.measureText(testStr).width;
-    ctx.font = `${size} "${font}", serif`;
-    const w3 = ctx.measureText(testStr).width;
-    return w1 !== monoWidth || w2 !== sansWidth || w3 !== serifWidth;
-  });
+interface SystemFontGroups {
+  all: string[];
+  monospace: string[];
+  chinese: string[];
 }
 
-function toFontFamily(name: string): string {
-  return `"${name}", monospace`;
+function normalizeFontName(fontName: string): string {
+  return fontName.trim().replace(/^['"]|['"]$/g, "");
+}
+
+function withCurrent(list: string[], current: string): string[] {
+  if (!current) return list;
+  return list.includes(current) ? list : [current, ...list];
 }
 
 function isLightTheme(theme: TerminalTheme): boolean {
@@ -101,14 +62,36 @@ export function SettingsDialog({
   onCancel,
 }: SettingsDialogProps) {
   const [settings, setSettings] = useState<TerminalSettings>(initial);
-  const [availableFonts, setAvailableFonts] = useState<string[]>([]);
+  const [monoFonts, setMonoFonts] = useState<string[]>([]);
+  const [chineseFonts, setChineseFonts] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) {
       setSettings(initial);
-      setAvailableFonts(detectAvailableFonts(ALL_MONO_FONTS));
+      invoke<SystemFontGroups>("system_list_fonts")
+        .then((fonts) => {
+          const normalizedMono = Array.from(
+            new Set(fonts.monospace.map((font) => normalizeFontName(font)).filter(Boolean))
+          ).sort((a, b) => a.localeCompare(b));
+
+          const normalizedChinese = Array.from(
+            new Set(fonts.chinese.map((font) => normalizeFontName(font)).filter(Boolean))
+          ).sort((a, b) => a.localeCompare(b));
+
+          const currentPrimary = normalizeFontName(initial.fontFamily || "");
+          const currentChinese = normalizeFontName(initial.fontFamilySecondary || "");
+
+          setMonoFonts(withCurrent(normalizedMono, currentPrimary));
+          setChineseFonts(withCurrent(normalizedChinese, currentChinese));
+        })
+        .catch(() => {
+          const currentPrimary = normalizeFontName(initial.fontFamily || "");
+          const currentChinese = normalizeFontName(initial.fontFamilySecondary || "");
+          setMonoFonts(currentPrimary ? [currentPrimary] : []);
+          setChineseFonts(currentChinese ? [currentChinese] : []);
+        });
     }
-  }, [open]);
+  }, [open, initial]);
 
   const theme = getTheme(settings);
 
@@ -191,18 +174,42 @@ export function SettingsDialog({
           {/* Font */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label className="text-sm font-medium">Font Family</Label>
+              <Label className="text-sm font-medium">Monospace Font</Label>
               <Select
-                value={settings.fontFamily}
-                onChange={(e) => update({ fontFamily: e.target.value })}
+                value={normalizeFontName(settings.fontFamily)}
+                onChange={(e) => update({ fontFamily: normalizeFontName(e.target.value) })}
               >
-                {availableFonts.map((font) => (
-                  <option key={font} value={toFontFamily(font)}>
+                {monoFonts.length === 0 && (
+                  <option value={normalizeFontName(settings.fontFamily)}>
+                    {normalizeFontName(settings.fontFamily) || "No monospace fonts found"}
+                  </option>
+                )}
+                {monoFonts.map((font) => (
+                  <option key={font} value={font}>
                     {font}
                   </option>
                 ))}
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Chinese Font</Label>
+              <Select
+                value={normalizeFontName(settings.fontFamilySecondary || "")}
+                onChange={(e) =>
+                  update({ fontFamilySecondary: normalizeFontName(e.target.value) })
+                }
+              >
+                <option value="">None</option>
+                {chineseFonts.map((font) => (
+                  <option key={font} value={font}>
+                    {font}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label className="text-sm font-medium">Font Size</Label>
               <Input
@@ -214,6 +221,7 @@ export function SettingsDialog({
                 className="h-9"
               />
             </div>
+            <div />
           </div>
 
           {/* Cursor */}

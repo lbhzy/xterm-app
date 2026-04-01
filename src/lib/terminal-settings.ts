@@ -26,6 +26,7 @@ export interface TerminalTheme {
 export interface TerminalSettings {
   fontSize: number;
   fontFamily: string;
+  fontFamilySecondary?: string;
   cursorBlink: boolean;
   cursorStyle: "block" | "underline" | "bar";
   themeName: string;
@@ -407,17 +408,59 @@ export const BUILTIN_THEMES: Record<string, TerminalTheme> = {
 
 const DEFAULT_SETTINGS: TerminalSettings = {
   fontSize: 14,
-  fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+  fontFamily: "Cascadia Mono",
+  fontFamilySecondary: "",
   cursorBlink: true,
   cursorStyle: "block",
-  themeName: "Dark (Default)",
-  appTheme: "dark-blue",
+  themeName: "GitHub Light",
+  appTheme: "light",
 };
+
+function stripQuotes(name: string): string {
+  return name.trim().replace(/^['"]|['"]$/g, "");
+}
+
+function splitFontStack(stack: string): string[] {
+  return stack
+    .split(",")
+    .map((part) => stripQuotes(part))
+    .filter((part) => {
+      const lower = part.toLowerCase();
+      return lower !== "monospace" && lower !== "serif" && lower !== "sans-serif";
+    });
+}
+
+function quoteFont(name: string): string {
+  return `"${name.replace(/"/g, "\\\"")}"`;
+}
+
+export function getResolvedFontFamily(settings: TerminalSettings): string {
+  const primary = stripQuotes(settings.fontFamily || DEFAULT_SETTINGS.fontFamily);
+  const secondary = stripQuotes(settings.fontFamilySecondary || "");
+
+  const familyParts = [quoteFont(primary)];
+  if (secondary) familyParts.push(quoteFont(secondary));
+  familyParts.push("monospace");
+  return familyParts.join(", ");
+}
 
 export async function loadTerminalSettings(): Promise<TerminalSettings> {
   try {
     const data = await invoke<TerminalSettings | null>("config_read", { key: CONFIG_KEY });
-    if (data) return { ...DEFAULT_SETTINGS, ...data };
+    if (data) {
+      const merged = { ...DEFAULT_SETTINGS, ...data };
+
+      // Migrate old font stack format into primary + secondary fields.
+      const parsed = splitFontStack(merged.fontFamily || DEFAULT_SETTINGS.fontFamily);
+      const primary = parsed[0] || DEFAULT_SETTINGS.fontFamily;
+      const secondary = merged.fontFamilySecondary || parsed[1] || "";
+
+      return {
+        ...merged,
+        fontFamily: primary,
+        fontFamilySecondary: secondary,
+      };
+    }
   } catch {}
   return DEFAULT_SETTINGS;
 }
