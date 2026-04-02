@@ -44,7 +44,8 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            libudev-dev
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
