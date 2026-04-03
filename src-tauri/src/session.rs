@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::mpsc;
 use std::sync::Mutex;
+use tokio::sync::mpsc as tokio_mpsc;
 
 pub enum SessionCmd {
     Write(Vec<u8>),
@@ -9,7 +9,7 @@ pub enum SessionCmd {
 }
 
 pub struct SessionManager {
-    senders: Mutex<HashMap<u32, mpsc::Sender<SessionCmd>>>,
+    senders: Mutex<HashMap<u32, tokio_mpsc::UnboundedSender<SessionCmd>>>,
     next_id: Mutex<u32>,
 }
 
@@ -28,7 +28,7 @@ impl SessionManager {
         current
     }
 
-    pub fn register(&self, id: u32, sender: mpsc::Sender<SessionCmd>) {
+    pub fn register(&self, id: u32, sender: tokio_mpsc::UnboundedSender<SessionCmd>) {
         self.senders.lock().unwrap().insert(id, sender);
     }
 
@@ -46,6 +46,13 @@ impl SessionManager {
         } else {
             Err(format!("Session {} not found", id))
         }
+    }
+
+    pub fn create_channel(&self) -> (u32, tokio_mpsc::UnboundedReceiver<SessionCmd>) {
+        let id = self.next_id();
+        let (tx, rx) = tokio_mpsc::unbounded_channel();
+        self.register(id, tx);
+        (id, rx)
     }
 }
 

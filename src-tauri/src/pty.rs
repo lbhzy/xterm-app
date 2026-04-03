@@ -1,6 +1,5 @@
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
-use std::sync::mpsc;
 use tauri::{AppHandle, Emitter};
 
 use crate::session::{SessionCmd, SessionManager};
@@ -38,20 +37,17 @@ pub fn pty_spawn(
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
 
-    let id = state.next_id();
-    let (tx, rx) = mpsc::channel::<SessionCmd>();
+    let (id, mut cmd_rx) = state.create_channel();
 
     let mut writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let master = pair.master;
 
-    state.register(id, tx);
-
     // Writer thread: receives commands from frontend
     let pty_id = id;
     std::thread::spawn(move || {
         let _master = master; // keep master alive for resize
-        while let Ok(cmd) = rx.recv() {
+        while let Some(cmd) = cmd_rx.blocking_recv() {
             match cmd {
                 SessionCmd::Write(data) => {
                     if writer.write_all(&data).is_err() || writer.flush().is_err() {

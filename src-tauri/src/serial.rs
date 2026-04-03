@@ -1,9 +1,6 @@
-use serialport::{self, SerialPortType};
-use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
-use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_serial::{self, SerialPortBuilderExt, SerialPortType};
 
 use crate::session::{SessionCmd, SessionManager};
 
@@ -15,7 +12,7 @@ pub struct SerialPortInfo {
 
 #[tauri::command]
 pub fn serial_list_ports() -> Result<Vec<SerialPortInfo>, String> {
-    let ports = serialport::available_ports().map_err(|e| e.to_string())?;
+    let ports = tokio_serial::available_ports().map_err(|e| e.to_string())?;
     Ok(ports
         .into_iter()
         .map(|p| SerialPortInfo {
@@ -31,74 +28,58 @@ pub fn serial_list_ports() -> Result<Vec<SerialPortInfo>, String> {
 }
 
 #[tauri::command]
-pub fn serial_connect(
+pub async fn serial_connect(
     app: AppHandle,
     state: tauri::State<'_, SessionManager>,
     port_name: String,
     baud_rate: u32,
 ) -> Result<u32, String> {
-    let port = serialport::new(&port_name, baud_rate)
-        .timeout(Duration::from_millis(50))
-        .open()
+    let port = tokio_serial::new(&port_name, baud_rate)
+        .open_native_async()
         .map_err(|e| format!("Failed to open serial port {}: {}", port_name, e))?;
 
-    let mut reader = port
-        .try_clone()
-        .map_err(|e| format!("Failed to clone serial port: {}", e))?;
+    let (session_id, mut cmd_rx) = state.create_channel();
 
-    let id = state.next_id();
-    let (tx, rx) = mpsc::channel::<SessionCmd>();
-    let running = Arc::new(AtomicBool::new(true));
-    state.register(id, tx);
+    // Async I/O task
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let (mut reader, mut writer) = tokio::io::split(port);
+        let mut buf = [0u8; 4096];
 
-    // Writer thread
-    let session_id = id;
-    let running_writer = Arc::clone(&running);
-    std::thread::spawn(move || {
-        let mut port = port;
-        while let Ok(cmd) = rx.recv() {
-            match cmd {
-                SessionCmd::Write(data) => {
-                    if port.write_all(&data).is_err() || port.flush().is_err() {
-                        running_writer.store(false, Ordering::Relaxed);
-                        break;
+        loop {
+            tokio::select! {
+                maybe_cmd = cmd_rx.recv() => {
+                    match maybe_cmd {
+                        Some(SessionCmd::Write(data)) => {
+                            if writer.write_all(&data).await.is_err() || writer.flush().await.is_err() {
+                                break;
+                            }
+                        }
+                        Some(SessionCmd::Resize { .. }) => {
+                            // Serial ports don't support resize.
+                        }
+                        Some(SessionCmd::Close) | None => {
+                            break;
+                        }
                     }
                 }
-                SessionCmd::Resize { .. } => {
-                    // Serial ports don't support resize
-                }
-                SessionCmd::Close => {
-                    running_writer.store(false, Ordering::Relaxed);
-                    break;
+                read_result = reader.read(&mut buf) => {
+                    match read_result {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                            let _ = app_handle.emit(&format!("session-output-{}", session_id), &data);
+                        }
+                        Err(_) => break,
+                    }
                 }
             }
         }
-    });
 
-    // Reader thread
-    let app_handle = app.clone();
-    let running_reader = Arc::clone(&running);
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        while running_reader.load(Ordering::Relaxed) {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = app_handle.emit(&format!("session-output-{}", session_id), &data);
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
-                    // Timeout is normal for serial, just continue
-                    continue;
-                }
-                Err(_) => break,
-            }
-        }
-
-        running_reader.store(false, Ordering::Relaxed);
+        let _ = writer.shutdown().await;
         app_handle.state::<SessionManager>().remove(session_id);
         let _ = app_handle.emit(&format!("session-exit-{}", session_id), ());
     });
 
-    Ok(id)
+    Ok(session_id)
 }
