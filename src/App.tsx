@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
-import { Terminal, type ConnectionConfig, type TerminalHandle } from "./components/Terminal";
+import { Terminal, type ConnectionConfig, type SessionStatus, type TerminalHandle } from "./components/Terminal";
 import { ConnectDialog } from "./components/ConnectDialog";
 import { QuickCommandBar } from "./components/QuickCommandBar";
 import { QuickCommandManager } from "./components/QuickCommandManager";
@@ -51,6 +51,28 @@ function getTabIcon(type: ConnectionConfig["type"]) {
   }
 }
 
+function getSessionStatusDotClass(status: SessionStatus): string {
+  switch (status) {
+    case "disconnected":
+      return "bg-red-500";
+    case "connecting":
+      return "bg-yellow-400";
+    case "connected":
+      return "bg-green-500";
+  }
+}
+
+function getSessionStatusText(status: SessionStatus): string {
+  switch (status) {
+    case "disconnected":
+      return "断开";
+    case "connecting":
+      return "连接中";
+    case "connected":
+      return "已连接";
+  }
+}
+
 // VS Code-style layout icons (codicons)
 function SidebarLeftIcon() {
   return (
@@ -78,6 +100,7 @@ function PanelBottomOffIcon() {
 
 function App() {
   const [tabs, setTabs] = useState<TabInfo[]>([]);
+  const [tabStatusMap, setTabStatusMap] = useState<Map<number, SessionStatus>>(new Map());
   const [activeTab, setActiveTab] = useState(-1);
   const [nextId, setNextId] = useState(1);
   const [showDialog, setShowDialog] = useState(false);
@@ -164,6 +187,11 @@ function App() {
       const id = nextId;
       setNextId((n) => n + 1);
       setTabs((prev) => [...prev, { id, label: getTabLabel(config), config }]);
+      setTabStatusMap((prev) => {
+        const next = new Map(prev);
+        next.set(id, "connecting");
+        return next;
+      });
       setActiveTab(id);
       setShowDialog(false);
     },
@@ -192,6 +220,13 @@ function App() {
       });
 
       setWaveDataMap((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+
+      setTabStatusMap((prev) => {
         if (!prev.has(id)) return prev;
         const next = new Map(prev);
         next.delete(id);
@@ -422,7 +457,11 @@ function App() {
               className="bg-card/50 border-b border-border/50 h-9 shrink-0"
             >
               <TabsList className="h-full w-full justify-start rounded-none bg-transparent p-0 overflow-x-auto scrollbar-thin">
-                {tabs.map((tab) => (
+                {tabs.map((tab) => {
+                  // Session status dots mapping per user requirement:
+                  // green=disconnected, yellow=connecting, red=connected
+                  const status = tabStatusMap.get(tab.id) ?? "connecting";
+                  return (
                   <TabsTrigger
                     key={tab.id}
                     value={String(tab.id)}
@@ -436,6 +475,10 @@ function App() {
                       {getTabIcon(tab.config.type)}
                     </span>
                     <span className="max-w-[140px] truncate">{tab.label}</span>
+                    <span
+                      className={cn("inline-block h-2 w-2 rounded-full", getSessionStatusDotClass(status))}
+                      title={getSessionStatusText(status)}
+                    />
                     <Button
                       asChild
                       variant="ghost"
@@ -461,7 +504,8 @@ function App() {
                       </span>
                     </Button>
                   </TabsTrigger>
-                ))}
+                  );
+                })}
               </TabsList>
             </Tabs>
           )}
@@ -534,6 +578,14 @@ function App() {
                   onSendCommand={(cmd) => {
                     const handle = terminalRefs.current.get(tab.id);
                     if (handle) handle.sendCommand(cmd);
+                  }}
+                  onStatusChange={(status) => {
+                    setTabStatusMap((prev) => {
+                      if (prev.get(tab.id) === status) return prev;
+                      const next = new Map(prev);
+                      next.set(tab.id, status);
+                      return next;
+                    });
                   }}
                 />
               ))

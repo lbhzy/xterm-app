@@ -10,6 +10,7 @@ import { type TerminalSettings, getTheme, getResolvedFontFamily } from "@/lib/te
 import type { Trigger } from "@/lib/triggers";
 
 export type ConnectionType = "pty" | "ssh" | "serial";
+export type SessionStatus = "disconnected" | "connecting" | "connected";
 
 export interface PtyConfig {
   type: "pty";
@@ -95,6 +96,7 @@ interface TerminalProps {
   onOutput?: (data: string) => void;
   onResize?: (rows: number, cols: number) => void;
   onSendCommand?: (command: string) => void;
+  onStatusChange?: (status: SessionStatus) => void;
 }
 
 export interface TerminalHandle {
@@ -103,7 +105,7 @@ export interface TerminalHandle {
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
-  function Terminal({ config, active, settings, triggers, onOutput, onResize, onSendCommand }, ref) {
+  function Terminal({ config, active, settings, triggers, onOutput, onResize, onSendCommand, onStatusChange }, ref) {
   const termRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -116,6 +118,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
   triggersRef.current = triggers;
   const onSendCommandRef = useRef(onSendCommand);
   onSendCommandRef.current = onSendCommand;
+  const onStatusChangeRef = useRef(onStatusChange);
+  onStatusChangeRef.current = onStatusChange;
 
   useImperativeHandle(ref, () => ({
     sendCommand: (command: string) => {
@@ -152,10 +156,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     let sessionId: number | null = null;
     let unlistenOutput: (() => void) | null = null;
     let unlistenExit: (() => void) | null = null;
+    let disposed = false;
 
     async function init() {
       const rows = xterm.rows;
       const cols = xterm.cols;
+      onStatusChangeRef.current?.("connecting");
 
       try {
         switch (config.type) {
@@ -187,10 +193,21 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         }
       } catch (e) {
         xterm.write(`\r\n\x1b[31mConnection failed: ${e}\x1b[0m\r\n`);
+        if (!disposed) {
+          onStatusChangeRef.current?.("disconnected");
+        }
+        return;
+      }
+
+      if (disposed) {
+        if (sessionId !== null) {
+          invoke("session_close", { id: sessionId });
+        }
         return;
       }
 
       sessionIdRef.current = sessionId;
+      onStatusChangeRef.current?.("connected");
 
       unlistenOutput = await listen<string>(
         `session-output-${sessionId}`,
@@ -220,6 +237,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       unlistenExit = await listen<void>(
         `session-exit-${sessionId}`,
         () => {
+          onStatusChangeRef.current?.("disconnected");
           xterm.write("\r\n\x1b[33m[Session ended]\x1b[0m\r\n");
         }
       );
@@ -256,6 +274,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     }
 
     return () => {
+      disposed = true;
       window.removeEventListener("resize", handleResize);
       resizeObserver.disconnect();
       unlistenOutput?.();
@@ -263,6 +282,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       if (sessionIdRef.current !== null) {
         invoke("session_close", { id: sessionIdRef.current });
       }
+      onStatusChangeRef.current?.("disconnected");
       xterm.dispose();
     };
   }, []);
